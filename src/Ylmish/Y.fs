@@ -43,6 +43,7 @@ module Delta =
 
     module ToAdaptive =
         let private generate f start count =
+            printfn $"Delta.ToAdaptive.generate: start: {start} count: {count}"
             let indexes = Index.generate f start count
             let ops' = IndexListDelta.ofList indexes
             let index' =
@@ -53,16 +54,21 @@ module Delta =
             index', ops'
 
         let folder getItem getCount ((index, ops, totalCount, currentCount) : Index * IndexListDelta<'b> * int * int) delta =
+            printfn $"Delta.ToAdaptive.folder: previous index: {index}"
             match delta with
             | Y.Delta.Retain ret ->
+                printfn $"Delta.ToAdaptive.folder: retain        : {ret}"
                 let index' = Index.increment index ret
                 index', ops, totalCount, currentCount + ret
 
             | Y.Delta.Delete del ->
+                printfn $"Delta.ToAdaptive.folder: delete        : {del}"
                 let index', ops' = generate (fun _ j -> j, ElementOperation<'b>.Remove) (Index.after index) (del - 1)
+                printfn $"Delta.ToAdaptive.folder: index: {index'}"
                 index', IndexListDelta.combine ops ops', totalCount - del, currentCount - del
 
             | Y.Delta.Insert ins ->
+                printfn $"Delta.ToAdaptive.folder: insert        : \"{ins}\""
                 // If we're at the end of the clist (see note below) then we can just use Index.after the previous index.
                 //
                 // However, if we're anywhere else, we need to create an index between the previous index and the
@@ -109,15 +115,31 @@ module Delta =
 
             match state, op with
             | [], op when index = Index.zero ->
+                printfn $"{String('-', 80)}"
+                printfn $"*** case 1: empty state, index = Index.zero ***"
+                printfn $"{String('-', 80)}"
+
+                printfn $"index            : {index.ToString().Trim()}"
+                printfn $"op               : {op}"
+
                 let lengthInserted =
                   match op with
                   | ElementOperation.Set c  -> getLengthAdaptive c
                   | ElementOperation.Remove -> 0
 
+                printfn $"lengthInserted   : {lengthInserted}"
+
                 [{ Index = index; NextPosition = lengthInserted; Delta = opToDelta op }]
 
             | [], op ->
+                printfn $"{String('-', 80)}"
+                printfn $"*** case 2: empty state, index <> Index.zero ***"
+                printfn $"{String('-', 80)}"
+
                 let initialPosition = getPosition index
+
+                if initialPosition = 0 then
+                  printfn $"WARNING: initialPosition = 0, but index <> Index.zero!? (initialPosition: {initialPosition} index: {index})"
 
                 let lengthInserted =
                   match op with
@@ -129,6 +151,12 @@ module Delta =
 
                 let delta = opToDelta op
 
+                printfn $"index            : {index.ToString().Trim()}"
+                printfn $"op               : {op}"
+                printfn $"initialPosition  : {initialPosition}"
+                printfn $"nextPosition     : {nextPosition}"
+                printfn $"toRetain         : {toRetain}"
+
                 [
                   { Index = index; NextPosition = nextPosition; Delta = delta }
 
@@ -138,19 +166,72 @@ module Delta =
 
             | ({ Index = prevIndex; Delta = Y.Delta.Insert(ins) } as previous) :: rest, ElementOperation.Set c
                 when index = Index.after prevIndex ->
+                printfn $"{String('-', 80)}"
+                printfn $"*** case 3 ***"
+                printfn $"{String('-', 80)}"
+
+                printfn $"previous index   : {previous.Index}"
+                printfn $"previous next pos: {previous.NextPosition}"
+                printfn $"previous delta   : {JSON.stringify(previous.Delta)}"
+                printfn $"rest             : %A{rest.Length}"
+                printfn ""
+                printfn $"index            : {index.ToString().Trim()}"
+                printfn $"op               : {op}"
+                printfn ""
+
                 let nextPosition = previous.NextPosition + (getLengthAdaptive c)
+                printfn $"nextPosition     : %A{nextPosition}"
 
                 { Index = index; NextPosition = nextPosition; Delta = Y.Delta.Insert (append ins c) } :: rest
 
             | ({ Index = prevIndex; Delta = Y.Delta.Delete(del) } as previous) :: rest, ElementOperation.Remove
                 when index = Index.after prevIndex ->
+                printfn $"{String('-', 80)}"
+                printfn $"*** case 4 ***"
+                printfn $"{String('-', 80)}"
+
+                printfn $"previous index   : {previous.Index}"
+                printfn $"previous next pos: {previous.NextPosition}"
+                printfn $"previous delta   : {JSON.stringify(previous.Delta)}"
+                printfn $"rest             : %A{rest.Length}"
+                printfn ""
+                printfn $"index            : {index.ToString().Trim()}"
+                printfn $"op               : {op}"
+                printfn ""
+                printfn $"nextPosition     : %A{previous.NextPosition + 1}"
+
                 { Index = index; NextPosition = previous.NextPosition + 1; Delta = Y.Delta.Delete (del + 1) } :: rest
 
             | ({ Index = prevIndex } as previous) :: rest, op
                 when index = Index.after prevIndex ->
+                printfn $"{String('-', 80)}"
+                printfn $"*** case 5 ***"
+                printfn $"{String('-', 80)}"
+
+                printfn $"previous index   : {previous.Index}"
+                printfn $"previous next pos: {previous.NextPosition}"
+                printfn $"previous delta   : {JSON.stringify(previous.Delta)}"
+                printfn $"rest             : %A{rest.Length}"
+                printfn ""
+                printfn $"index            : {index.ToString().Trim()}"
+                printfn $"op               : {op}"
+                printfn ""
+                printfn $"nextPosition     : %A{previous.NextPosition + 1}"
+
                 { Index = index; NextPosition = previous.NextPosition + 1; Delta = opToDelta op } :: previous :: rest
 
             | previous:: rest, op ->
+                printfn $"{String('-', 80)}"
+                printfn $"*** case 6 ***"
+                printfn $"{String('-', 80)}"
+
+                printfn $"index            : {index.ToString().Trim()}"
+                printfn $"op               : {op}"
+                printfn $"previous index   : {previous.Index}"
+                printfn $"previous next pos: {previous.NextPosition}"
+                printfn $"previous delta   : {JSON.stringify(previous.Delta)}"
+                printfn $"rest             : %A{rest.Length}"
+
                 let pos = getPosition index
 
                 let ret =
@@ -170,6 +251,9 @@ module Delta =
                     // That gives us 5 - 3 = 2 (which is correct - we want to retain the 2 items 3 and 4).
                     pos - previous.NextPosition
 
+                printfn $"position         : {pos}"
+                printfn $"retain           : {ret}"
+
                 [
                   { Index = index; NextPosition = pos (* TODO - test this *); Delta = opToDelta op }
 
@@ -182,6 +266,7 @@ module Delta =
                 ]
 
     let ofAdaptive folder (delta : IndexListDelta<'a>) : ResizeArray<Y.Delta<'b>> =
+        printfn $"Delta.ofAdaptive()"
         delta
         |> IndexListDelta.toList
         |> List.fold folder []
@@ -198,7 +283,34 @@ module Text =
             Delta.toAdaptive folder initialCount delta
 
         let ofAdaptive (list: IndexList<_>) (delta: IndexListDelta<char>) =
+            let dumpList (xs: IndexList<_>) : string =
+              let sb = Text.StringBuilder()
+              let append (s: string) = sb.Append(s) |> ignore
+
+              append "[ "
+
+              for i in 0..xs.Count - 1 do
+                let index =
+                  match xs.TryGetIndex i with
+                  | Some x -> x
+                  | None -> failwith $"IndexList appears to have no index at position {i}"
+
+                append $"%9O{index}"
+                append ", '"
+                append (string xs[index])
+                append "'"
+
+                if i < xs.Count - 1 then
+                  append "; "
+
+              append " ]"
+
+              sb.ToString()
+
+            printfn $"Original list: {dumpList list} (Count: {list.Count})"
             let list', _ = IndexList.applyDelta list delta
+            printfn $"Updated  list: {dumpList list'} (Count: {list'.Count})"
+            printfn $"DELTA: {delta}"
             let folder =
                 Delta.OfAdaptive.folder
                     (fun i ->
@@ -214,8 +326,10 @@ module Text =
                         //   IndexList.tryGetPosition i list  = None
                         //   IndexList.tryGetPosition i list' = Some _
                         let index =
+                            printfn $"Trying to get position of {i} from updated list..."
                             IndexList.tryGetPosition i list'
                             |> Option.orElseWith (fun () ->
+                              printfn $"Trying to get position of {i} from original list..."
                               IndexList.tryGetPosition i list
                             )
                             |> Option.get
@@ -256,11 +370,15 @@ module Text =
         let disposeYObserver =
             // https://docs.yjs.dev/api/delta-format
             let observeY (e : Y.Text.Event) (_ : Y.Transaction) =
+                printfn $"Y.Text.attach:Y observer: e.delta: %A{Fable.Core.JS.JSON.stringify(e.delta)}"
+                printfn $"Y.Text.attach:Y observer: active : %A{active}"
                 if not active then
                   active <- true
                   try
                       let delta' = Impl.toAdaptive atext.Count e.delta
+                      printfn $"Y.Text.attach:Y observer1: delta'  : %A{delta'}"
                       transact (fun () -> atext.Perform delta')
+                      printfn $"Y.Test.attach:Y observer: at completion:atext: %A{atext.Value.AsArray}"
                   finally
                       active <- false
 
@@ -274,14 +392,23 @@ module Text =
             let mutable initialisationCallback = true
 
             atext.AddCallback(fun list delta ->
+              printfn $"Y.Text.attach:adaptive callback: list   : %A{list}"
+              printfn $"Y.Text.attach:adaptive callback: delta  : %A{delta}"
+              printfn $"Y.Text.attach:adaptive callback: active : %A{active}"
               if initialisationCallback then
                 // Skip the first callback - it's to perform initialisation, which we've already done
                 // before this function is called
                 initialisationCallback <- false
+                
+                let delta' = Impl.ofAdaptive list delta
+                printfn $"Y.Text.attach:adaptive callback: SKIPPING THE FOLLOWING delta':"
+                printfn $"Y.Text.attach:adaptive callback: delta' : %A{delta'}"
+
               else if not active then
                 active <- true
                 try
                   let delta' = Impl.ofAdaptive list delta
+                  printfn $"Y.Text.attach:adaptive callback: delta' : %A{delta'}"
                   //match ytext.doc with
                   //| None ->
                   //    console.warn ($"\
